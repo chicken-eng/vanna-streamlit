@@ -4,8 +4,15 @@ from vanna.remote import VannaDefault
 
 @st.cache_resource(ttl=3600)
 def setup_vanna():
-    vn = VannaDefault(api_key=st.secrets.get("VANNA_API_KEY"), model='chinook')
-    vn.connect_to_sqlite("https://vanna.ai/Chinook.sqlite")
+    vn = VannaDefault(api_key=st.secrets.get("VANNA_API_KEY"), model='chinook-11')
+    vn.connect_to_postgres(
+            host=st.secrets["DB_HOST"],
+            dbname=st.secrets["DB_NAME"],
+            user=st.secrets["DB_USER"],
+            password=st.secrets["DB_PASSWORD"],
+            port=st.secrets.get("DB_PORT", 5432),
+            sslmode="require"
+        )
     return vn
 
 @st.cache_data(show_spinner="Generating sample questions ...")
