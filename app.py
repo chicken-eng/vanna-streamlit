@@ -1,14 +1,21 @@
 import streamlit as st
 from vanna.remote import VannaDefault
+import vanna
+
+st.write("Vanna version:", vanna.__version__)
 
 api_key = st.secrets.get("VANNA_API_KEY")
-st.write("API Key found:", api_key is not None)
-# shows first 5 chars only
-st.write("API Key value:", api_key[:5] if api_key else "MISSING")
-
 vn = VannaDefault(api_key=api_key, model='chinook-11')
-st.write("Vanna object created:", vn is not None)
 
-training_data = vn.get_training_data()
-st.write("Training data:", training_data)
-st.write("Training data type:", type(training_data))
+# Try alternate method
+try:
+    st.write("Training data:", vn.get_training_data())
+except Exception as e:
+    st.write("get_training_data error:", str(e))
+
+# Try a direct SQL generation to see if that works independently
+try:
+    sql = vn.generate_sql("how many customers are there?")
+    st.write("SQL generated:", sql)
+except Exception as e:
+    st.write("generate_sql error:", str(e))
