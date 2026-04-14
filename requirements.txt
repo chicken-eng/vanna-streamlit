@@ -1,4 +1,3 @@
-vanna==0.7.4
-vanna[postgres]
 streamlit
-python-dotenv
+requests
+pandas
