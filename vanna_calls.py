@@ -12,6 +12,7 @@ def call_vanna_api(message: str) -> dict:
     data = {
         "message": message,
         "agent_id": "chinook-11",
+        "user_email": "praisekayenda.pk@gmail.com",
         "acceptable_responses": ["text", "sql", "dataframe", "plotly", "buttons"]
     }
     result = {"text": None, "sql": None, "dataframe": None, "plotly": None}
