@@ -1,4 +1,4 @@
-vanna==0.7.4
+vanna
 vanna[postgres]
 streamlit
 python-dotenv
