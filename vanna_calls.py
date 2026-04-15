@@ -179,6 +179,95 @@ def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | 
                     return None             
     return None
 
+def get_column_samples(sql: str) -> str:
+    """Looks at the SQL, finds the tables used, and fetches distinct values for text columns."""
+    engine = get_engine()
+    samples = []
+    
+    try:
+        # Extract table names crudely from the SQL
+        words = sql.lower().split()
+        tables = []
+        for i, word in enumerate(words):
+            if word in ("from", "join") and i + 1 < len(words):
+                table = words[i + 1].strip("(),;")
+                if table and not table.startswith("("):
+                    tables.append(table)
+        
+        with engine.connect() as conn:
+            for table in set(tables):
+                try:
+                    # Get text columns for this table
+                    col_result = conn.execute(text(f"""
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = '{table}' 
+                        AND data_type IN ('text', 'character varying', 'USER-DEFINED')
+                        LIMIT 10
+                    """))
+                    columns = [row[0] for row in col_result]
+                    
+                    for col in columns:
+                        try:
+                            val_result = conn.execute(text(f"""
+                                SELECT DISTINCT {col} 
+                                FROM {table} 
+                                WHERE {col} IS NOT NULL 
+                                LIMIT 10
+                            """))
+                            values = [str(row[0]) for row in val_result]
+                            if values:
+                                samples.append(f"{table}.{col}: {', '.join(values)}")
+                        except:
+                            pass
+                except:
+                    pass
+    except:
+        pass
+    
+    return "\n".join(samples)
+
+def generate_sql_with_retry(question: str) -> str | None:
+    """Generates SQL, runs it, and if empty retries with real column values."""
+    sql = generate_sql(question)
+    if not sql:
+        return None
+    
+    # First attempt
+    df = run_query(sql)
+    
+    # If result is empty, fetch real values and retry once
+    if df is not None and df.empty:
+        samples = get_column_samples(sql)
+        if samples:
+            llm = get_llm()
+            retry_prompt = PromptTemplate(
+                input_variables=["schema", "question", "bad_sql", "samples"],
+                template="""
+{schema}
+
+You previously generated this SQL query:
+{bad_sql}
+
+It returned zero results. Here are the actual distinct values stored in the relevant columns:
+{samples}
+
+Using these exact values, rewrite the SQL query to answer this question:
+{question}
+
+Return ONLY the SQL query with no explanation, no markdown, no code fences.
+"""
+            )
+            chain = retry_prompt | llm
+            sql = chain.invoke({
+                "schema": SCHEMA_DESCRIPTION,
+                "question": question,
+                "bad_sql": sql,
+                "samples": samples
+            }).content.strip()
+    
+    return sql
+
 def generate_sql(question: str) -> str | None:
     llm = get_llm()
     chain = SQL_PROMPT | llm
@@ -210,7 +299,7 @@ def generate_questions_cached():
 
 @st.cache_data(show_spinner="Generating SQL query ...")
 def generate_sql_cached(question: str):
-    return generate_sql(question)
+    return generate_sql_with_retry(question)
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
 def is_sql_valid_cached(sql: str):
