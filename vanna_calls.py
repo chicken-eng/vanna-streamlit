@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, text
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
+import time
 
 # ----------------------------
 # Database connection
