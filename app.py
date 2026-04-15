@@ -12,7 +12,7 @@ from vanna_calls import (
     generate_summary_cached
 )
 
-avatar_url = "https://vanna.ai/img/vanna.svg"
+avatar_url = "https://i0.wp.com/fieldscopeint.com/wp-content/uploads/2026/03/logo-FSI.jpg?resize=200%2C200&ssl=1"
 
 st.set_page_config(layout="wide")
 
