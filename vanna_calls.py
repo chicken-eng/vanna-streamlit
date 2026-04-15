@@ -2,8 +2,8 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableSequence
 
 # ----------------------------
 # Database connection
@@ -155,8 +155,8 @@ def run_query(sql: str) -> pd.DataFrame | None:
 
 def generate_sql(question: str) -> str | None:
     llm = get_llm()
-    chain = LLMChain(llm=llm, prompt=SQL_PROMPT)
-    result = chain.run(schema=SCHEMA_DESCRIPTION, question=question)
+    chain = SQL_PROMPT | llm
+    result = chain.invoke({"schema": SCHEMA_DESCRIPTION, "question": question}).content
     result = result.strip()
     if result == "UNSUPPORTED" or not result.lower().startswith("select"):
         return None
@@ -164,9 +164,9 @@ def generate_sql(question: str) -> str | None:
 
 def generate_response(question: str, df: pd.DataFrame) -> str | None:
     llm = get_llm()
-    chain = LLMChain(llm=llm, prompt=RESPONSE_PROMPT)
+    chain = RESPONSE_PROMPT | llm
     data_str = df.to_string(index=False) if df is not None else "No data returned."
-    return chain.run(question=question, data=data_str)
+    return chain.invoke({"question": question, "data": data_str}).content
 
 # ----------------------------
 # Cached wrappers (matching app.py signatures exactly)
