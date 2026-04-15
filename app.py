@@ -28,130 +28,119 @@ st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_wi
 st.title("FSI AI")
 # st.sidebar.write(st.session_state)
 
-
 def set_question(question):
     st.session_state["my_question"] = question
 
+# 1. Initialize the chat history list if it doesn't exist yet
+if "messages" not in st.session_state:
+    st.session_state["messages"] = []
 
-assistant_message_suggested = st.chat_message(
-    "assistant", avatar=avatar_url
-)
-if assistant_message_suggested.button("Click to show suggested questions"):
-    st.session_state["my_question"] = None
-    questions = generate_questions_cached()
-    for i, question in enumerate(questions):
-        time.sleep(0.05)
-        button = st.button(
-            question,
-            on_click=set_question,
-            args=(question,),
-        )
+# 2. Display the "Suggested Questions" button ONLY if the chat is empty
+if len(st.session_state["messages"]) == 0:
+    assistant_message_suggested = st.chat_message("assistant", avatar=avatar_url)
+    if assistant_message_suggested.button("Click to show suggested questions"):
+        questions = generate_questions_cached()
+        for i, question in enumerate(questions):
+            time.sleep(0.05)
+            st.button(question, on_click=set_question, args=(question,))
 
-my_question = st.session_state.get("my_question", default=None)
+# 3. Loop through and draw all past messages
+for msg in st.session_state["messages"]:
+    if msg["role"] == "user":
+        st.chat_message("user").write(msg["content"])
+    elif msg["role"] == "assistant":
+        with st.chat_message("assistant", avatar=avatar_url):
+            if msg.get("error"):
+                st.error(msg["error"])
+            else:
+                if msg.get("sql") and st.session_state.get("show_sql", True):
+                    st.code(msg["sql"], language="sql", line_numbers=True)
+                if msg.get("df") is not None and st.session_state.get("show_table", True):
+                    df = msg["df"]
+                    if len(df) > 10:
+                        st.text("First 10 rows of data")
+                        st.dataframe(df.head(10))
+                    else:
+                        st.dataframe(df)
+                if msg.get("plotly_code") and st.session_state.get("show_plotly_code", False):
+                    st.code(msg["plotly_code"], language="python", line_numbers=True)
+                if msg.get("fig") and st.session_state.get("show_chart", True):
+                    st.plotly_chart(msg["fig"])
+                if msg.get("summary") and st.session_state.get("show_summary", True):
+                    st.text(msg["summary"])
 
+# 4. Always show the input box
 user_input = st.chat_input("Ask me a question about your data")
 
-# 2. If the user types something in the box, update the session state
+# Determine the current question (from chat input OR from clicking a suggestion)
+my_question = None
 if user_input:
-    st.session_state["my_question"] = user_input
+    my_question = user_input
+elif st.session_state.get("my_question"):
+    my_question = st.session_state["my_question"]
+    # Clear it so it doesn't trigger again on the next UI rerun
+    st.session_state["my_question"] = None 
 
-# 3. Retrieve the current question (whether from the chat input or a suggested button)
-my_question = st.session_state.get("my_question", default=None)
-
-
+# 5. Process the NEW question
 if my_question:
-   
-    user_message = st.chat_message("user")
-    user_message.write(f"{my_question}")
-
-    sql = generate_sql_cached(question=my_question)
-
-    if sql:
-        if is_sql_valid_cached(sql=sql):
+    # Append user question to history
+    st.session_state["messages"].append({"role": "user", "content": my_question})
+    st.chat_message("user").write(my_question)
+    
+    # Process assistant response inside its chat bubble
+    with st.chat_message("assistant", avatar=avatar_url):
+        # We'll build a dictionary to save this turn's data to history
+        turn_data = {"role": "assistant"}
+        
+        sql = generate_sql_cached(question=my_question)
+        
+        if sql and is_sql_valid_cached(sql=sql):
+            turn_data["sql"] = sql
             if st.session_state.get("show_sql", True):
-                assistant_message_sql = st.chat_message(
-                    "assistant", avatar=avatar_url
-                )
-                assistant_message_sql.code(sql, language="sql", line_numbers=True)
-        else:
-            assistant_message = st.chat_message(
-                "assistant", avatar=avatar_url
-            )
-            assistant_message.write(sql)
-            st.stop()
-
-        df = run_sql_cached(sql=sql)
-
-        if df is not None:
-            st.session_state["df"] = df
-
-        if st.session_state.get("df") is not None:
-            if st.session_state.get("show_table", True):
-                df = st.session_state.get("df")
-                assistant_message_table = st.chat_message(
-                    "assistant",
-                    avatar=avatar_url,
-                )
-                if len(df) > 10:
-                    assistant_message_table.text("First 10 rows of data")
-                    assistant_message_table.dataframe(df.head(10))
-                else:
-                    assistant_message_table.dataframe(df)
-
-            if should_generate_chart_cached(question=my_question, sql=sql, df=df):
-
-                code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
-
-                if st.session_state.get("show_plotly_code", False):
-                    assistant_message_plotly_code = st.chat_message(
-                        "assistant",
-                        avatar=avatar_url,
-                    )
-                    assistant_message_plotly_code.code(
-                        code, language="python", line_numbers=True
-                    )
-
-                if code is not None and code != "":
-                    if st.session_state.get("show_chart", True):
-                        assistant_message_chart = st.chat_message(
-                            "assistant",
-                            avatar=avatar_url,
-                        )
+                st.code(sql, language="sql", line_numbers=True)
+                
+            df = run_sql_cached(sql=sql)
+            
+            if df is not None:
+                turn_data["df"] = df
+                if st.session_state.get("show_table", True):
+                    if len(df) > 10:
+                        st.text("First 10 rows of data")
+                        st.dataframe(df.head(10))
+                    else:
+                        st.dataframe(df)
+                        
+                if should_generate_chart_cached(question=my_question, sql=sql, df=df):
+                    code = generate_plotly_code_cached(question=my_question, sql=sql, df=df)
+                    turn_data["plotly_code"] = code
+                    if st.session_state.get("show_plotly_code", False):
+                        st.code(code, language="python", line_numbers=True)
+                        
+                    if code:
                         fig = generate_plot_cached(code=code, df=df)
-                        if fig is not None:
-                            assistant_message_chart.plotly_chart(fig)
+                        if fig:
+                            turn_data["fig"] = fig
+                            if st.session_state.get("show_chart", True):
+                                st.plotly_chart(fig)
                         else:
-                            assistant_message_chart.error("I couldn't generate a chart")
-
-            if st.session_state.get("show_summary", True):
-                assistant_message_summary = st.chat_message(
-                    "assistant",
-                    avatar=avatar_url,
-                )
+                            st.error("I couldn't generate a chart")
+                            
                 summary = generate_summary_cached(question=my_question, df=df)
-                if summary is not None:
-                    assistant_message_summary.text(summary)
-
-            if st.session_state.get("show_followup", True):
-                assistant_message_followup = st.chat_message(
-                    "assistant",
-                    avatar=avatar_url,
-                )
-                followup_questions = generate_followup_cached(
-                    question=my_question, sql=sql, df=df
-                )
-                st.session_state["df"] = None
-
-                if len(followup_questions) > 0:
-                    assistant_message_followup.text(
-                        "Here are some possible follow-up questions"
-                    )
-                    # Print the first 5 follow-up questions
-                    for question in followup_questions[:5]:
-                        assistant_message_followup.button(question, on_click=set_question, args=(question,))
-
-    else:
-        assistant_message_error = st.chat_message(
-            "assistant", avatar=avatar_url
-        )
-        assistant_message_error.error("I wasn't able to generate SQL for that question")
+                if summary:
+                    turn_data["summary"] = summary
+                    if st.session_state.get("show_summary", True):
+                        st.text(summary)
+                        
+                # Follow-up questions (we don't save these to history, just show them for the active turn)
+                if st.session_state.get("show_followup", True):
+                    followup_questions = generate_followup_cached(question=my_question, sql=sql, df=df)
+                    if followup_questions:
+                        st.text("Here are some possible follow-up questions")
+                        for q in followup_questions[:5]:
+                            st.button(q, on_click=set_question, args=(q,))
+        else:
+            turn_data["error"] = "I wasn't able to generate SQL for that question or the query was unsupported."
+            st.error(turn_data["error"])
+            
+        # Finally, append the full assistant response to the history
+        st.session_state["messages"].append(turn_data)
