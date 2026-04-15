@@ -144,14 +144,18 @@ If the question cannot be answered with SQL, return the word: UNSUPPORTED
 RESPONSE_PROMPT = PromptTemplate(
     input_variables=["question", "data"],
     template="""
-You are a helpful data analyst. A user asked: "{question}"
+You are a data analyst reporting internal database results to a colleague.
+A user asked: "{question}"
 
 The query returned this data:
 {data}
 
-If the result is a single value or a simple yes/no fact, respond in one clear sentence.
-If the result has multiple rows or columns, present it as a clean markdown table.
-Do not add unnecessary commentary. Be concise and professional.
+Rules:
+- Report ONLY what the data shows. Never compare to external benchmarks or real world statistics.
+- If the result is a single value, respond in one short sentence stating just the number.
+- If the result has multiple rows or columns, present it as a clean markdown table.
+- Do not add commentary, caveats, or explanations unless the data is empty.
+- If no data was returned, say: "No results were found for that question."
 """
 )
 
@@ -244,22 +248,45 @@ def get_column_samples(sql: str) -> str:
 
 def generate_sql_with_retry(question: str) -> str | None:
     """Generates SQL, runs it, and if empty retries with real column values."""
-    sql = generate_sql(question)
-    if not sql:
-        return None
     
-    # First attempt
-    df = run_query(sql)
-    
-    # If result is empty, fetch real values and retry once
-    sql_error = st.session_state.pop("last_sql_error", None)
-    if (df is not None and df.empty) or (df is None and sql_error):
-        samples = get_column_samples(sql)
-        if samples:
-            llm = get_llm()
-            retry_prompt = PromptTemplate(
-                input_variables=["schema", "question", "bad_sql", "samples"],
-                template="""
+    with st.expander("🔍 Query Process", expanded=True):
+        # Step 1
+        st.markdown("**Step 1: Generating SQL...**")
+        sql = generate_sql(question)
+        
+        if not sql:
+            st.error("Could not generate a valid SQL query.")
+            return None
+        
+        st.code(sql, language="sql")
+        
+        # Step 2
+        st.markdown("**Step 2: Running query...**")
+        df = run_query(sql)
+        sql_error = st.session_state.pop("last_sql_error", None)
+        
+        if df is not None and not df.empty:
+            st.success(f"Query returned {len(df)} row(s). No retry needed.")
+            return sql
+        
+        # Step 3 — retry
+        if (df is not None and df.empty) or (df is None and sql_error):
+            if sql_error:
+                st.warning(f"Query failed with error: {sql_error}")
+            else:
+                st.warning("Query returned 0 results. Fetching actual column values to retry...")
+            
+            st.markdown("**Step 3: Fetching real column values from database...**")
+            samples = get_column_samples(sql)
+            
+            if samples:
+                st.text(samples)
+                st.markdown("**Step 4: Retrying with correct values...**")
+                
+                llm = get_llm()
+                retry_prompt = PromptTemplate(
+                    input_variables=["schema", "question", "bad_sql", "samples"],
+                    template="""
 {schema}
 
 You previously generated this SQL query:
@@ -273,14 +300,19 @@ Using these exact values, rewrite the SQL query to answer this question:
 
 Return ONLY the SQL query with no explanation, no markdown, no code fences.
 """
-            )
-            chain = retry_prompt | llm
-            sql = chain.invoke({
-                "schema": SCHEMA_DESCRIPTION,
-                "question": question,
-                "bad_sql": sql,
-                "samples": samples
-            }).content.strip()
+                )
+                chain = retry_prompt | llm
+                sql = chain.invoke({
+                    "schema": SCHEMA_DESCRIPTION,
+                    "question": question,
+                    "bad_sql": sql,
+                    "samples": samples
+                }).content.strip()
+                
+                st.markdown("**Retried SQL:**")
+                st.code(sql, language="sql")
+            else:
+                st.warning("Could not fetch column samples for retry.")
     
     return sql
 
