@@ -25,7 +25,8 @@ st.sidebar.checkbox("Show Summary", value=True, key="show_summary")
 st.sidebar.checkbox("Show Follow-up Questions", value=True, key="show_followup")
 st.sidebar.button("Reset", on_click=lambda: set_question(None), use_container_width=True)
 
-st.title("Vanna AI")
+st.title("FSI AI")
+st.sentence("Your in house data analys")
 # st.sidebar.write(st.session_state)
 
 
