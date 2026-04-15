@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
 import time
@@ -23,9 +23,9 @@ def get_engine():
 # ----------------------------
 @st.cache_resource
 def get_llm():
-    return ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        google_api_key=st.secrets["GEMINI_API_KEY"],
+    return ChatGroq(
+        model="llama3-70b-8192",
+        groq_api_key=st.secrets["GROQ_API_KEY"],
         temperature=0
     )
 
