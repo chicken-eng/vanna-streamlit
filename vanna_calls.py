@@ -143,16 +143,40 @@ Do not add unnecessary commentary. Be concise and professional.
 # ----------------------------
 # Core functions
 # ----------------------------
-def run_query(sql: str) -> pd.DataFrame | None:
-    try:
-        engine = get_engine()
-        with engine.connect() as conn:
-            result = conn.execute(text(sql))
-            df = pd.DataFrame(result.fetchall(), columns=result.keys())
-            return df
-    except Exception as e:
-        st.error(f"SQL execution error: {e}")
-        return None
+def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | None:
+    """Runs the query with a retry loop to handle Neon's cold starts."""
+    engine = get_engine()
+    
+    # st.status provides a spinner UI that we can update text for dynamically
+    with st.status("Connecting to database...", expanded=True) as status:
+        for attempt in range(max_retries):
+            try:
+                with engine.connect() as conn:
+                    status.update(label="Executing query...", state="running")
+                    result = conn.execute(text(sql))
+                    df = pd.DataFrame(result.fetchall(), columns=result.keys())
+                    status.update(label="Query successful!", state="complete", expanded=False)
+                    return df
+                    
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check if the error is likely due to the database being asleep
+                is_conn_error = any(keyword in error_str for keyword in [
+                    "connection", "timeout", "closed", "ssl", "operationalerror"
+                ])
+                
+                if is_conn_error and attempt < max_retries - 1:
+                    status.update(
+                        label=f"Waking up database... (Attempt {attempt + 1} of {max_retries})", 
+                        state="running"
+                    )
+                    time.sleep(delay)  # Wait a few seconds before trying again
+                else:
+                    # If it's a strict SQL syntax error or we ran out of retries, fail out
+                    status.update(label="Query failed.", state="error")
+                    st.error(f"SQL execution error: {e}")
+                    return None             
+    return None
 
 def generate_sql(question: str) -> str | None:
     llm = get_llm()
