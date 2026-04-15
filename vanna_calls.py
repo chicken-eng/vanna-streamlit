@@ -104,6 +104,7 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 3. Never query the error_log table.
 4. Always use lowercase table and column names.
 5. Use PostgreSQL syntax only.
+6. You can disregard is_deleted and is_active in everyday queries unless specified in the question.
 """
 
 # ----------------------------
