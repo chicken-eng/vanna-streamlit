@@ -165,6 +165,7 @@ Rules:
 def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | None:
     """Runs the query with a retry loop to handle Neon's cold starts."""
     engine = get_engine()
+    df = None  # Initialize df here
     
     # st.status provides a spinner UI that we can update text for dynamically
     with st.status("Connecting to database...", expanded=True) as status:
@@ -175,7 +176,7 @@ def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | 
                     result = conn.execute(text(sql))
                     df = pd.DataFrame(result.fetchall(), columns=result.keys())
                     status.update(label="Query successful!", state="complete", expanded=False)
-                    return df
+                    break  # Exit the retry loop gracefully instead of returning early
                     
             except Exception as e:
                 error_str = str(e).lower()
@@ -195,8 +196,10 @@ def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | 
                     status.update(label="Query failed.", state="error")
                     st.session_state["last_sql_error"] = str(e)
                     st.error(f"SQL execution error: {e}")
-                    return None             
-    return None
+                    break  # Also break here on complete failure
+                    
+    # Return df OUTSIDE the context manager so Streamlit fully closes the UI status
+    return df
 
 def get_column_samples(sql: str) -> str:
     """Looks at the SQL, finds the tables used, and fetches distinct values for text columns."""
