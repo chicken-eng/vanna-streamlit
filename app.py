@@ -12,6 +12,10 @@ from vanna_calls import (
     generate_summary_cached
 )
 
+@st.cache_data
+def convert_df_to_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
+
 avatar_url = "https://i0.wp.com/fieldscopeint.com/wp-content/uploads/2026/03/logo-FSI.jpg?resize=200%2C200&ssl=1"
 
 st.set_page_config(layout="wide")
@@ -57,6 +61,15 @@ for msg in st.session_state["messages"]:
                     st.code(msg["sql"], language="sql", line_numbers=True)
                 if msg.get("df") is not None and st.session_state.get("show_table", True):
                     df = msg["df"]
+                    # 1. Provide the download button for the FULL dataframe
+                    csv = convert_df_to_csv(df)
+                    st.download_button(
+                         label=f"📥 Download Full Data ({len(df)} rows)",
+                         data=csv,
+                         file_name='fsi_data_export.csv',
+                         mime='text/csv',
+                         key=f"download_{id(df)}" # Unique key required for Streamlit buttons
+                    )
                     if len(df) > 10:
                         st.text("First 10 rows of data")
                         st.dataframe(df.head(10))
