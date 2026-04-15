@@ -106,6 +106,20 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 4. Always use lowercase table and column names.
 5. Use PostgreSQL syntax only.
 6. You can disregard is_deleted and is_active in everyday queries unless specified in the question.
+7. Several columns in the database are PostgreSQL enum types, not plain text. 
+   These include but are not limited to: country, uk_region, county_state, gender, 
+   ethnicity, relationship, job_status, job_title_tier, industry, 
+   highest_education_level, annual_household_income, company_size, company_turnover, 
+   years_in_business, approximate_salary_bracket, project_state, company_turnover.
+   
+   For ANY column that filters by a categorical or descriptive value, NEVER assume 
+   the format or use abbreviations. Always use the full stored value exactly as it 
+   appears in the database. For example: 'United States of America' not 'US', 
+   'United Kingdom' not 'UK', 'Male' not 'M'.
+   
+   When unsure of the exact enum value, use ILIKE for partial matching instead:
+   WHERE column::text ILIKE '%keyword%'
+   This casts the enum to text first which avoids type errors entirely.
 """
 
 # ----------------------------
@@ -175,6 +189,7 @@ def run_query(sql: str, max_retries: int = 5, delay: int = 3) -> pd.DataFrame | 
                 else:
                     # If it's a strict SQL syntax error or we ran out of retries, fail out
                     status.update(label="Query failed.", state="error")
+                    st.session_state["last_sql_error"] = str(e)
                     st.error(f"SQL execution error: {e}")
                     return None             
     return None
@@ -237,7 +252,8 @@ def generate_sql_with_retry(question: str) -> str | None:
     df = run_query(sql)
     
     # If result is empty, fetch real values and retry once
-    if df is not None and df.empty:
+    sql_error = st.session_state.pop("last_sql_error", None)
+    if (df is not None and df.empty) or (df is None and sql_error):
         samples = get_column_samples(sql)
         if samples:
             llm = get_llm()
