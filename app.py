@@ -49,14 +49,18 @@ if assistant_message_suggested.button("Click to show suggested questions"):
 
 my_question = st.session_state.get("my_question", default=None)
 
-if my_question is None:
-    my_question = st.chat_input(
-        "Ask me a question about your data",
-    )
+user_input = st.chat_input("Ask me a question about your data")
+
+# 2. If the user types something in the box, update the session state
+if user_input:
+    st.session_state["my_question"] = user_input
+
+# 3. Retrieve the current question (whether from the chat input or a suggested button)
+my_question = st.session_state.get("my_question", default=None)
 
 
 if my_question:
-    st.session_state["my_question"] = my_question
+   
     user_message = st.chat_message("user")
     user_message.write(f"{my_question}")
 
