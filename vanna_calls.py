@@ -105,7 +105,7 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 3. Never query the error_log table.
 4. Always use lowercase table and column names.
 5. Use PostgreSQL syntax only.
-6. You can disregard is_deleted and is_active in everyday queries unless specified in the question.
+6. Disregard is_deleted and is_active columns unless specified in the question.
 7. When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response. 
    The user interface will automatically display the data. 
    Your text response should only be a brief summary of what you found, never the raw rows themselves.
@@ -178,9 +178,10 @@ Rules:
 - If the result is a single value, respond in one short sentence stating just the number.
 - If the result has multiple rows or columns, present it as a clean markdown table.
 - Do not add commentary, caveats, or explanations unless the data is empty.
-- When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response. 
+- When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response.
   The user interface will automatically display the data. Your text response should only be a brief summary of what you found, never the raw rows themselves.
 - If no data was returned, say: "No results were found for that question."
+- Disregard is_deleted and is_active columns unless specified in the question.
 """
 )
 
