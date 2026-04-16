@@ -148,10 +148,11 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 # SQL generation prompt
 # ----------------------------
 SQL_PROMPT = PromptTemplate(
-    input_variables=["schema", "question"],
+    input_variables=["schema", "history", "question"],
     template="""
 {schema}
 
+{history}
 Given the database schema and rules above, write a PostgreSQL SQL query to answer this question:
 {question}
 
@@ -273,13 +274,13 @@ def get_column_samples(sql: str) -> str:
     
     return "\n".join(samples)
 
-def generate_sql_with_retry(question: str) -> str | None:
+def generate_sql_with_retry(question: str, history: str = "") -> str | None:
     """Generates SQL, runs it, and if empty retries with real column values."""
     
     with st.expander("🔍 Query Process", expanded=True):
         # Step 1
         st.markdown("**Step 1: Generating SQL...**")
-        sql = generate_sql(question)
+        sql = generate_sql(question, history=history)
         
         if not sql:
             st.error("Could not generate a valid SQL query.")
@@ -312,10 +313,11 @@ def generate_sql_with_retry(question: str) -> str | None:
                 
                 llm = get_llm()
                 retry_prompt = PromptTemplate(
-                    input_variables=["schema", "question", "bad_sql", "samples"],
+                    input_variables=["schema", "history", "question", "bad_sql", "samples"],
                     template="""
 {schema}
 
+{history}
 You previously generated this SQL query:
 {bad_sql}
 
@@ -331,6 +333,7 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
                 chain = retry_prompt | llm
                 sql = chain.invoke({
                     "schema": SCHEMA_DESCRIPTION,
+                    "history": history,
                     "question": question,
                     "bad_sql": sql,
                     "samples": samples
@@ -346,7 +349,7 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
 def generate_sql(question: str) -> str | None:
     llm = get_llm()
     chain = SQL_PROMPT | llm
-    result = chain.invoke({"schema": SCHEMA_DESCRIPTION, "question": question}).content
+    result = chain.invoke({"schema": SCHEMA_DESCRIPTION, "history": history, "question": question}).content
     result = result.strip()
     if result == "UNSUPPORTED" or not result.lower().startswith("select"):
         return None
@@ -372,9 +375,8 @@ def generate_questions_cached():
         "How many respondents have unsubscribed?",
     ]
 
-@st.cache_data(show_spinner="Generating SQL query ...")
-def generate_sql_cached(question: str):
-    return generate_sql_with_retry(question)
+def generate_sql_cached(question: str, history: str = ""):
+    return generate_sql_with_retry(question, history=history)
 
 @st.cache_data(show_spinner="Checking for valid SQL ...")
 def is_sql_valid_cached(sql: str):
