@@ -14,9 +14,34 @@ from vanna_calls import (
 )
 
 def build_history_string(messages: list, max_turns: int = 3) -> str:
-    """Builds a compact conversation context string from the last N turns."""
-    recent = []
-    # Walk backwards through messages to get the last max_turns Q+A pairs
+    """
+    Builds conversation context from the last N turns.
+    Skips history if the current question appears to be a topic shift
+    (i.e. doesn't reference pronouns or connective words).
+    """
+    if not messages:
+        return ""
+
+    # Connective words that signal the user is continuing a prior thread
+    continuation_signals = [
+        "and ", "also ", "what about", "how about", "same for", 
+        "now ", "but ", "instead", "those", "them", "their",
+        "that", "these", "the same", "similar", "above"
+    ]
+    
+    # Get the last user message to check if it's a continuation
+    last_user_msg = ""
+    for msg in reversed(messages):
+        if msg["role"] == "user":
+            last_user_msg = msg["content"].lower()
+            break
+    
+    is_continuation = any(signal in last_user_msg for signal in continuation_signals)
+    
+    # If no continuation signal, this looks like a fresh topic — skip history
+    if not is_continuation:
+        return ""
+        
     pairs = []
     i = len(messages) - 1
     while i >= 0 and len(pairs) < max_turns:
