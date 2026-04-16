@@ -195,9 +195,8 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
     may not have an address record and an INNER JOIN would silently exclude them from 
     counts.
 13.Never use SELECT * in any query. Always specify the columns you need explicitly.
-14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
-    Example: WHERE created_date >= '2024-01-01'::timestamptz
-    Never assume a date column is plain DATE type.
+14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons (e.g., column_name >= '2024-01-01'::timestamptz). 
+Use only date columns explicitly listed in the schema.
 """
 
 STATIC_SCHEMA_FALLBACK = """
@@ -307,9 +306,8 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
     may not have an address record and an INNER JOIN would silently exclude them from 
     counts.
 13.Never use SELECT * in any query. Always specify the columns you need explicitly.
-14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
-    Example: WHERE created_date >= '2024-01-01'::timestamptz
-    Never assume a date column is plain DATE type.
+14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons (e.g., column_name >= '2024-01-01'::timestamptz). 
+Use only date columns explicitly listed in the schema.
 """
 
 # ----------------------------
