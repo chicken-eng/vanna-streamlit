@@ -29,10 +29,152 @@ def get_llm():
         temperature=0
     )
 
+@st.cache_resource
+def get_schema_description() -> str:
+    """
+    Pulls live schema from the database and formats it for the LLM,
+    then appends the static business rules.
+    Only runs once per app session due to cache_resource.
+    """
+    engine = get_engine()
+    
+    try:
+        with engine.connect() as conn:
+            # 1. Get all tables in public schema
+            tables_result = conn.execute(text("""
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                  AND table_type = 'BASE TABLE'
+                  AND table_name NOT IN (
+                    'staging_emails', 'staging_respondents', 
+                    'staging_projects', 'staging_respondent_projects',
+                    'error_log'
+                  )
+                ORDER BY table_name
+            """))
+            tables = [row[0] for row in tables_result]
+            
+            # 2. Get columns + constraints for each table
+            cols_result = conn.execute(text("""
+                SELECT 
+                    cols.table_name,
+                    cols.column_name,
+                    cols.data_type,
+                    cols.is_nullable,
+                    tc.constraint_type
+                FROM information_schema.columns cols
+                LEFT JOIN information_schema.key_column_usage kcu
+                    ON cols.table_name = kcu.table_name 
+                    AND cols.column_name = kcu.column_name
+                    AND kcu.table_schema = 'public'
+                LEFT JOIN information_schema.table_constraints tc
+                    ON kcu.constraint_name = tc.constraint_name
+                    AND tc.table_schema = 'public'
+                WHERE cols.table_schema = 'public'
+                  AND cols.table_name = ANY(:tables)
+                ORDER BY cols.table_name, cols.ordinal_position
+            """), {"tables": tables})
+            
+            # 3. Group columns by table
+            from collections import defaultdict
+            table_cols = defaultdict(list)
+            for row in cols_result:
+                table_name, col_name, data_type, nullable, constraint = row
+                # Format nicely: email (varchar, PK), first_name (varchar)
+                col_str = f"{col_name} ({data_type}"
+                if constraint == 'PRIMARY KEY':
+                    col_str += ", PK"
+                elif constraint == 'FOREIGN KEY':
+                    col_str += ", FK"
+                if nullable == 'NO':
+                    col_str += ", NOT NULL"
+                col_str += ")"
+                table_cols[table_name].append(col_str)
+            
+            # 4. Build a compact schema string
+            schema_lines = [
+                "You are a data analyst assistant for a market research and panel management company.",
+                "The PostgreSQL database contains the following tables:\n"
+            ]
+            for table in tables:
+                cols = table_cols.get(table, [])
+                schema_lines.append(f"- {table}: {', '.join(cols)}")
+            
+            schema_lines.append("")  # blank line
+            schema_lines.append(BUSINESS_CONTEXT)  # append your rules below
+            
+            return "\n".join(schema_lines)
+            
+    except Exception as e:
+        # Fall back to static description if DB is unreachable
+        st.warning(f"Could not load live schema, using static fallback: {e}")
+        return STATIC_SCHEMA_FALLBACK
+        
 # ----------------------------
 # Schema context
 # ----------------------------
-SCHEMA_DESCRIPTION = """
+BUSINESS_CONTEXT = """
+IMPORTANT BUSINESS CONTEXT:
+- respondent: Core table of the database. Nearly all table connect through this table.
+- almost all table connect though a column called email. 
+- unsubscribe_blacklist contains opted-out emails — ALWAYS exclude them
+
+CRITICAL RULES YOU MUST ALWAYS FOLLOW:
+1. ALWAYS exclude emails that appear in the unsubscribe_blacklist table from ANY query 
+   result that returns respondent emails or counts unless specified otherwise. Always use:
+   AND email NOT IN (SELECT email FROM unsubscribe_blacklist)
+   or a LEFT JOIN with WHERE unsubscribe_blacklist.email IS NULL.
+2. Never query the error_log table.
+3. Always use lowercase table and column names.
+4. Use PostgreSQL syntax only.
+5. DISREGARD is_deleted and is_active columns from respondent and respondent_type_specification tables in your queries unless specified in the question.
+7. When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response. 
+   The user interface will automatically display the data. Your text response should only be a brief summary of what you found, never the raw rows themselves.
+8. Several columns in the database are PostgreSQL enum types, not plain text. 
+   These include but are not limited to: country, uk_region, county_state, gender, 
+   ethnicity, relationship, job_status, job_title_tier, industry, 
+   highest_education_level, annual_household_income, company_size, company_turnover, 
+   years_in_business, approximate_salary_bracket, project_state, company_turnover.
+   
+   For ANY column that filters by a categorical or descriptive value, NEVER assume 
+   the format or use abbreviations. Always use the full stored value exactly as it 
+   appears in the database. For example: 'United States of America' not 'US', 
+   'United Kingdom' not 'UK', 'Male' not 'M'.
+   
+   When unsure of the exact enum value, use ILIKE for partial matching instead:
+   WHERE column::text ILIKE '%keyword%' This casts the enum to text first which avoids type errors entirely.
+9. ALWAYS qualify every column name with its table alias when writing JOIN queries.
+   Never write SELECT email, SELECT country etc when multiple tables are joined.
+   Always write SELECT r.email, SELECT a.country etc.
+   This applies to WHERE clauses, ON clauses, GROUP BY, and ORDER BY as well.
+   Example: WHERE r.email NOT IN (...) not WHERE email NOT IN (...).
+10.When a question asks for a LIST of people or records, always include at minimum:
+   r.email, r.first_name, r.last_name in the SELECT. Never return email alone 
+   as a list — it is not human readable enough.
+11.When a question asks to COUNT something, return a single aliased column.
+    Example: SELECT COUNT(DISTINCT r.email) AS total_respondents
+    Never return an unnamed count column.
+12.When joining respondent to addresses, always use LEFT JOIN not INNER JOIN unless 
+    the question specifically requires an address field to be present. Many respondents 
+    may not have an address record and an INNER JOIN would silently exclude them from 
+    counts.
+13.Never use SELECT * in any query. Always specify the columns you need explicitly.
+14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
+    Example: WHERE created_date >= '2024-01-01'::timestamptz
+    Never assume a date column is plain DATE type.
+15. NEVER use date_of_birth to filter for when a respondent joined, registered, or was 
+    created. date_of_birth is their biological birthdate only.
+    For questions about "new respondents", "registered this year", "joined in [year]", 
+    "created in [year]", or any variation of when someone was added to the panel, 
+    ALWAYS use created_date on the respondent table.
+    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026
+    Example: WHERE r.created_date >= '2026-01-01'::timestamptz.
+16. When a question asks about "this year", use the current year which is 2026.
+    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026.
+"""
+
+STATIC_SCHEMA_FALLBACK = """
 You are a data analyst assistant for a market research and panel management company.
 The PostgreSQL database contains the following key tables:
 
@@ -97,15 +239,18 @@ The PostgreSQL database contains the following key tables:
 
 CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 1. ALWAYS exclude emails that appear in the unsubscribe_blacklist table from ANY query 
-   result that returns respondent emails or counts unless specified otherwise. Always use:
+   result that returns respondent emails or counts. Always use:
    AND email NOT IN (SELECT email FROM unsubscribe_blacklist)
    or a LEFT JOIN with WHERE unsubscribe_blacklist.email IS NULL.
-2. Never query the error_log table.
-3. Always use lowercase table and column names.
-4. Use PostgreSQL syntax only.
-5. DISREGARD is_deleted and is_active columns from respondent and respondent_type_specification tables in your queries unless specified in the question.
+2. Never query staging tables (staging_emails, staging_respondents, staging_projects, 
+   staging_respondent_projects).
+3. Never query the error_log table.
+4. Always use lowercase table and column names.
+5. Use PostgreSQL syntax only.
+6. You can disregard is_deleted and is_active in everyday queries unless specified in the question.
 7. When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response. 
-   The user interface will automatically display the data. Your text response should only be a brief summary of what you found, never the raw rows themselves.
+   The user interface will automatically display the data. 
+   Your text response should only be a brief summary of what you found, never the raw rows themselves.
 8. Several columns in the database are PostgreSQL enum types, not plain text. 
    These include but are not limited to: country, uk_region, county_state, gender, 
    ethnicity, relationship, job_status, job_title_tier, industry, 
@@ -118,7 +263,8 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
    'United Kingdom' not 'UK', 'Male' not 'M'.
    
    When unsure of the exact enum value, use ILIKE for partial matching instead:
-   WHERE column::text ILIKE '%keyword%' This casts the enum to text first which avoids type errors entirely.
+   WHERE column::text ILIKE '%keyword%'
+   This casts the enum to text first which avoids type errors entirely.
 9. ALWAYS qualify every column name with its table alias when writing JOIN queries.
    Never write SELECT email, SELECT country etc when multiple tables are joined.
    Always write SELECT r.email, SELECT a.country etc.
@@ -138,6 +284,15 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
     Example: WHERE created_date >= '2024-01-01'::timestamptz
     Never assume a date column is plain DATE type.
+15. NEVER use date_of_birth to filter for when a respondent joined, registered, or was 
+    created. date_of_birth is their biological birthdate only.
+    For questions about "new respondents", "registered this year", "joined in [year]", 
+    "created in [year]", or any variation of when someone was added to the panel, 
+    ALWAYS use created_date on the respondent table.
+    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026
+    Example: WHERE r.created_date >= '2026-01-01'::timestamptz.
+16. When a question asks about "this year", use the current year which is 2026.
+    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026.
 """
 
 # ----------------------------
@@ -344,7 +499,7 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
 def generate_sql(question: str, history: str = "") -> str | None:
     llm = get_llm()
     chain = SQL_PROMPT | llm
-    result = chain.invoke({"schema": SCHEMA_DESCRIPTION, "history": history, "question": question}).content
+    result = chain.invoke({"schema": get_schema_description(), "history": history, "question": question}).content
     result = result.strip()
     if result == "UNSUPPORTED" or not result.lower().startswith("select"):
         return None
