@@ -482,7 +482,7 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
                 )
                 chain = retry_prompt | llm
                 sql = chain.invoke({
-                    "schema": SCHEMA_DESCRIPTION,
+                    "schema": get_schema_description(),
                     "history": history,
                     "question": question,
                     "bad_sql": sql,
