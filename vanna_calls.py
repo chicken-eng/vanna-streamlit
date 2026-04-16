@@ -49,7 +49,7 @@ def get_schema_description() -> str:
                   AND table_name NOT IN (
                     'staging_emails', 'staging_respondents', 
                     'staging_projects', 'staging_respondent_projects',
-                    'error_log'
+                    'error_log', 'survey_response'
                   )
                 ORDER BY table_name
             """))
@@ -91,18 +91,53 @@ def get_schema_description() -> str:
                     col_str += ", NOT NULL"
                 col_str += ")"
                 table_cols[table_name].append(col_str)
+
+              # 3. Get foreign key relationships
+            fk_result = conn.execute(text("""
+                SELECT
+                    kcu.table_name AS from_table,
+                    kcu.column_name AS from_col,
+                    ccu.table_name AS to_table,
+                    ccu.column_name AS to_col
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    AND tc.table_schema = kcu.table_schema
+                JOIN information_schema.constraint_column_usage ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                    AND ccu.table_schema = tc.table_schema
+                WHERE tc.constraint_type = 'FOREIGN KEY'
+                  AND tc.table_schema = 'public'
+                  AND kcu.table_name = ANY(:tables)
+                ORDER BY kcu.table_name
+            """), {"tables": tables})
+
+            relationships = defaultdict(list)
+            for row in fk_result:
+                from_table, from_col, to_table, to_col = row
+                relationships[from_table].append(
+                    f"{from_col} → {to_table}.{to_col}"
+                )
             
             # 4. Build a compact schema string
             schema_lines = [
                 "You are a data analyst assistant for a market research and panel management company.",
-                "The PostgreSQL database contains the following tables:\n"
+                "The PostgreSQL database contains the following tables:\n",
+                "COLUMN INVENTORY (use these exact column names — do not invent columns):\n"
             ]
+
             for table in tables:
                 cols = table_cols.get(table, [])
-                schema_lines.append(f"- {table}: {', '.join(cols)}")
+                schema_lines.append(f"TABLE: {table}")
+                schema_lines.append(f"  Columns: {', '.join(cols)}")
+                if relationships.get(table):
+                    schema_lines.append(f"  Foreign keys: {', '.join(relationships[table])}")
+                schema_lines.append("")
             
-            schema_lines.append("")  # blank line
-            schema_lines.append(BUSINESS_CONTEXT)  # append your rules below
+            schema_lines.append("RELATIONSHIPS SUMMARY:")
+            schema_lines.append("Tables that have no declared FK but join via email: use r.email = other_table.email")
+            schema_lines.append("")
+            schema_lines.append(BUSINESS_CONTEXT)
             
             return "\n".join(schema_lines)
             
@@ -163,15 +198,6 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
     Example: WHERE created_date >= '2024-01-01'::timestamptz
     Never assume a date column is plain DATE type.
-15. NEVER use date_of_birth to filter for when a respondent joined, registered, or was 
-    created. date_of_birth is their biological birthdate only.
-    For questions about "new respondents", "registered this year", "joined in [year]", 
-    "created in [year]", or any variation of when someone was added to the panel, 
-    ALWAYS use created_date on the respondent table.
-    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026
-    Example: WHERE r.created_date >= '2026-01-01'::timestamptz.
-16. When a question asks about "this year", use the current year which is 2026.
-    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026.
 """
 
 STATIC_SCHEMA_FALLBACK = """
@@ -284,15 +310,6 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
     Example: WHERE created_date >= '2024-01-01'::timestamptz
     Never assume a date column is plain DATE type.
-15. NEVER use date_of_birth to filter for when a respondent joined, registered, or was 
-    created. date_of_birth is their biological birthdate only.
-    For questions about "new respondents", "registered this year", "joined in [year]", 
-    "created in [year]", or any variation of when someone was added to the panel, 
-    ALWAYS use created_date on the respondent table.
-    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026
-    Example: WHERE r.created_date >= '2026-01-01'::timestamptz.
-16. When a question asks about "this year", use the current year which is 2026.
-    Example: WHERE EXTRACT(YEAR FROM r.created_date) = 2026.
 """
 
 # ----------------------------
@@ -380,8 +397,7 @@ def get_column_samples(sql: str) -> str:
     """Looks at the SQL, finds the tables used, and fetches distinct values for text columns."""
     engine = get_engine()
     samples = []
-    
-    try:
+
         # Extract table names crudely from the SQL
         words = sql.lower().split()
         tables = []
@@ -390,6 +406,8 @@ def get_column_samples(sql: str) -> str:
                 table = words[i + 1].strip("(),;")
                 if table and not table.startswith("("):
                     tables.append(table)
+
+        try:
         
         with engine.connect() as conn:
             for table in set(tables):
@@ -410,7 +428,7 @@ def get_column_samples(sql: str) -> str:
                                 SELECT DISTINCT {col} 
                                 FROM {table} 
                                 WHERE {col} IS NOT NULL 
-                                LIMIT 10
+                                LIMIT 5
                             """))
                             values = [str(row[0]) for row in val_result]
                             if values:
@@ -424,7 +442,48 @@ def get_column_samples(sql: str) -> str:
     
     return "\n".join(samples)
 
-def generate_sql_with_retry(question: str, history: str = "") -> str | None:
+def get_real_columns_for_sql(sql: str) -> str:
+    """
+    Given a SQL string, extracts all table names referenced and returns
+    their real column lists from information_schema. Used for UndefinedColumn retries.
+    """
+    engine = get_engine()
+    lines = []
+    
+    # Extract table names from FROM and JOIN clauses
+    words = sql.lower().split()
+    tables = []
+    for i, word in enumerate(words):
+        if word in ("from", "join") and i + 1 < len(words):
+            candidate = words[i + 1].strip("(),;")
+            if candidate and not candidate.startswith("(") and not candidate.startswith("select"):
+                tables.append(candidate)
+    
+    if not tables:
+        return ""
+    
+    try:
+        with engine.connect() as conn:
+            for table in set(tables):
+                try:
+                    result = conn.execute(text("""
+                        SELECT column_name, data_type
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = :table
+                        ORDER BY ordinal_position
+                    """), {"table": table})
+                    cols = [f"{row[0]} ({row[1]})" for row in result]
+                    if cols:
+                        lines.append(f"Table '{table}' has these columns: {', '.join(cols)}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    
+    return "\n".join(lines)
+
+def generate_sql_with_retry(question: str, history: str = "") -> tuple[str | None, pd.DataFrame | None]:
     """Generates SQL, runs it, and if empty retries with real column values."""
     
     with st.expander("🔍 Query Process", expanded=True):
@@ -445,26 +504,84 @@ def generate_sql_with_retry(question: str, history: str = "") -> str | None:
         
         if df is not None and not df.empty:
             st.success(f"Query returned {len(df)} row(s). No retry needed.")
-            return sql
+            return sql, df
         
         # Step 3 — retry
         if (df is not None and df.empty) or (df is None and sql_error):
-            if sql_error:
-                st.warning(f"Query failed with error: {sql_error}")
-            else:
-                st.warning("Query returned 0 results. Fetching actual column values to retry...")
             
-            st.markdown("**Step 3: Fetching real column values from database...**")
-            samples = get_column_samples(sql)
+            if sql_error and "undefinedcolumn" in sql_error.lower():
+                st.warning("⚠️ Query used a column that doesn't exist. Fetching real column names...")
+                st.markdown("**Step 3: Injecting real column inventory...**")
             
-            if samples:
-                st.text(samples)
-                st.markdown("**Step 4: Retrying with correct values...**")
-                
+            # Extract the offending table from the error or from the SQL
+                real_columns = get_real_columns_for_sql(sql)
+
+                if real_columns:
                 llm = get_llm()
                 retry_prompt = PromptTemplate(
-                    input_variables=["schema", "history", "question", "bad_sql", "samples"],
+                    input_variables=["schema", "history", "question", "bad_sql", "real_columns", "error"],
                     template="""
+{schema}
+
+{history}
+You previously generated this SQL query:
+{bad_sql}
+
+It failed with this error:
+{error}
+
+Here are the ACTUAL columns that exist on the tables used in your query:
+{real_columns}
+
+IMPORTANT: Only use column names from the list above. Do not invent or assume any column names.
+Rewrite the SQL query to answer this question using only the real columns listed:
+{question}
+
+Return ONLY the SQL query with no explanation, no markdown, no code fences.
+"""
+                )
+                chain = retry_prompt | llm
+                sql = chain.invoke({
+                    "schema": get_schema_description(),
+                    "history": history,
+                    "question": question,
+                    "bad_sql": sql,
+                    "real_columns": real_columns,
+                    "error": sql_error
+                }).content.strip()
+                
+                st.markdown("**Step 4: Retried SQL:**")
+                    st.code(sql, language="sql")
+                    
+                    df = run_query(sql)
+                    sql_error = st.session_state.pop("last_sql_error", None)
+                    if df is not None and not df.empty:
+                        st.success(f"✅ Retry successful — {len(df)} row(s).")
+                    elif sql_error:
+                        st.error(f"Retry also failed: {sql_error}")
+                    else:
+                        st.info("Retry ran but returned 0 results.")
+                    return sql, df
+
+            # --- Branch B: Zero results — inject real enum values ---
+            else:
+                if sql_error:
+                    st.warning(f"⚠️ Query failed: {sql_error}")
+                else:
+                    st.warning("⚠️ Query returned 0 results. Checking actual stored values...")
+                
+                st.markdown("**Step 3: Fetching column value samples...**")
+                samples = get_column_samples(sql)
+                
+                if samples:
+                    # Don't dump raw samples to UI — just confirm we got them
+                    st.info("✅ Retrieved column value samples for retry.")
+                    st.markdown("**Step 4: Retrying with correct values...**")
+                    
+                    llm = get_llm()
+                    retry_prompt = PromptTemplate(
+                        input_variables=["schema", "history", "question", "bad_sql", "samples"],
+                        template="""
 {schema}
 
 {history}
@@ -479,22 +596,32 @@ Using these exact values, rewrite the SQL query to answer this question:
 
 Return ONLY the SQL query with no explanation, no markdown, no code fences.
 """
-                )
-                chain = retry_prompt | llm
-                sql = chain.invoke({
-                    "schema": get_schema_description(),
-                    "history": history,
-                    "question": question,
-                    "bad_sql": sql,
-                    "samples": samples
-                }).content.strip()
-                
-                st.markdown("**Retried SQL:**")
-                st.code(sql, language="sql")
-            else:
-                st.warning("Could not fetch column samples for retry.")
+                    )
+                    chain = retry_prompt | llm
+                    sql = chain.invoke({
+                        "schema": get_schema_description(),
+                        "history": history,
+                        "question": question,
+                        "bad_sql": sql,
+                        "samples": samples
+                    }).content.strip()
+                    
+                    st.markdown("**Step 4: Retried SQL:**")
+                    st.code(sql, language="sql")
+                    
+                    df = run_query(sql)
+                    sql_error = st.session_state.pop("last_sql_error", None)
+                    if df is not None and not df.empty:
+                        st.success(f"✅ Retry successful — {len(df)} row(s).")
+                    elif sql_error:
+                        st.error(f"Retry also failed: {sql_error}")
+                    else:
+                        st.info("Retry ran but returned 0 results.")
+                else:
+                    st.warning("Could not fetch column samples for retry.")
     
-    return sql
+    return sql, df
+
 
 def generate_sql(question: str, history: str = "") -> str | None:
     llm = get_llm()
