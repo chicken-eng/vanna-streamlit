@@ -13,6 +13,32 @@ from vanna_calls import (
     generate_summary_cached
 )
 
+def build_history_string(messages: list, max_turns: int = 3) -> str:
+    """Builds a compact conversation context string from the last N turns."""
+    recent = []
+    # Walk backwards through messages to get the last max_turns Q+A pairs
+    pairs = []
+    i = len(messages) - 1
+    while i >= 0 and len(pairs) < max_turns:
+        if messages[i]["role"] == "assistant" and i > 0 and messages[i-1]["role"] == "user":
+            q = messages[i-1]["content"]
+            sql = messages[i].get("sql", "")
+            pairs.append((q, sql))
+            i -= 2
+        else:
+            i -= 1
+    
+    if not pairs:
+        return ""
+    
+    lines = ["The following is the recent conversation history for context:"]
+    for q, sql in reversed(pairs):
+        lines.append(f"User asked: {q}")
+        if sql:
+            lines.append(f"SQL used: {sql}")
+    lines.append("")  # blank line before new question
+    return "\n".join(lines)
+
 @st.cache_data
 def convert_df_to_csv(df):
     return df.to_csv(index=False).encode('utf-8')
@@ -107,8 +133,10 @@ if my_question:
     with st.chat_message("assistant", avatar=avatar_url):
         # We'll build a dictionary to save this turn's data to history
         turn_data = {"role": "assistant"}
-        
-        sql = generate_sql_cached(question=my_question)
+
+        history_str = build_history_string(st.session_state["messages"][:-1])
+
+        sql = generate_sql_cached(question=my_question, history=history_str)
         
         if sql and is_sql_valid_cached(sql=sql):
             turn_data["sql"] = sql
