@@ -514,10 +514,10 @@ def generate_sql_with_retry(question: str, history: str = "") -> tuple[str | Non
                 real_columns = get_real_columns_for_sql(sql)
 
                 if real_columns:
-                llm = get_llm()
-                retry_prompt = PromptTemplate(
-                    input_variables=["schema", "history", "question", "bad_sql", "real_columns", "error"],
-                    template="""
+                    llm = get_llm()
+                    retry_prompt = PromptTemplate(
+                        input_variables=["schema", "history", "question", "bad_sql", "real_columns", "error"],
+                        template="""
 {schema}
 
 {history}
