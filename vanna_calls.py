@@ -408,7 +408,6 @@ def get_column_samples(sql: str) -> str:
                     tables.append(table)
 
         try:
-        
         with engine.connect() as conn:
             for table in set(tables):
                 try:
