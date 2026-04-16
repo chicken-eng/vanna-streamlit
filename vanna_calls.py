@@ -123,6 +123,25 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
    When unsure of the exact enum value, use ILIKE for partial matching instead:
    WHERE column::text ILIKE '%keyword%'
    This casts the enum to text first which avoids type errors entirely.
+9. ALWAYS qualify every column name with its table alias when writing JOIN queries.
+   Never write SELECT email, SELECT country etc when multiple tables are joined.
+   Always write SELECT r.email, SELECT a.country etc.
+   This applies to WHERE clauses, ON clauses, GROUP BY, and ORDER BY as well.
+   Example: WHERE r.email NOT IN (...) not WHERE email NOT IN (...).
+10.When a question asks for a LIST of people or records, always include at minimum:
+   r.email, r.first_name, r.last_name in the SELECT. Never return email alone 
+   as a list — it is not human readable enough.
+11.When a question asks to COUNT something, return a single aliased column.
+    Example: SELECT COUNT(DISTINCT r.email) AS total_respondents
+    Never return an unnamed count column.
+12.When joining respondent to addresses, always use LEFT JOIN not INNER JOIN unless 
+    the question specifically requires an address field to be present. Many respondents 
+    may not have an address record and an INNER JOIN would silently exclude them from 
+    counts.
+13.Never use SELECT * in any query. Always specify the columns you need explicitly.
+14. When filtering by date, always use TIMESTAMP WITH TIME ZONE safe comparisons.
+    Example: WHERE created_date >= '2024-01-01'::timestamptz
+    Never assume a date column is plain DATE type.
 """
 
 # ----------------------------
