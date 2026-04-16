@@ -398,29 +398,27 @@ def get_column_samples(sql: str) -> str:
     engine = get_engine()
     samples = []
 
-        # Extract table names crudely from the SQL
-        words = sql.lower().split()
-        tables = []
-        for i, word in enumerate(words):
-            if word in ("from", "join") and i + 1 < len(words):
-                table = words[i + 1].strip("(),;")
-                if table and not table.startswith("("):
-                    tables.append(table)
+    words = sql.lower().split()
+    tables = []
+    for i, word in enumerate(words):
+        if word in ("from", "join") and i + 1 < len(words):
+            table = words[i + 1].strip("(),;")
+            if table and not table.startswith("("):
+                tables.append(table)
 
-        try:
+    try:
         with engine.connect() as conn:
             for table in set(tables):
                 try:
-                    # Get text columns for this table
                     col_result = conn.execute(text(f"""
                         SELECT column_name 
                         FROM information_schema.columns 
                         WHERE table_name = '{table}' 
                         AND data_type IN ('text', 'character varying', 'USER-DEFINED')
-                        LIMIT 10
+                        LIMIT 8
                     """))
                     columns = [row[0] for row in col_result]
-                    
+
                     for col in columns:
                         try:
                             val_result = conn.execute(text(f"""
@@ -438,7 +436,7 @@ def get_column_samples(sql: str) -> str:
                     pass
     except:
         pass
-    
+
     return "\n".join(samples)
 
 def get_real_columns_for_sql(sql: str) -> str:
