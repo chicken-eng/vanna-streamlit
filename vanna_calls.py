@@ -346,7 +346,7 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
     
     return sql
 
-def generate_sql(question: str) -> str | None:
+def generate_sql(question: str, history: str = "") -> str | None:
     llm = get_llm()
     chain = SQL_PROMPT | llm
     result = chain.invoke({"schema": SCHEMA_DESCRIPTION, "history": history, "question": question}).content
