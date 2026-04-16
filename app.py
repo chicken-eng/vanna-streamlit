@@ -1,4 +1,5 @@
 import time
+import uuid
 import streamlit as st
 from vanna_calls import (
     generate_questions_cached,
@@ -59,6 +60,7 @@ for msg in st.session_state["messages"]:
             else:
                 if msg.get("sql") and st.session_state.get("show_sql", True):
                     st.code(msg["sql"], language="sql", line_numbers=True)
+                    
                 if msg.get("df") is not None and st.session_state.get("show_table", True):
                     df = msg["df"]
                     # 1. Provide the download button for the FULL dataframe
@@ -68,13 +70,14 @@ for msg in st.session_state["messages"]:
                          data=csv,
                          file_name='fsi_data_export.csv',
                          mime='text/csv',
-                         key=f"download_{id(df)}" # Unique key required for Streamlit buttons
+                         key=f"download_hist_{uuid.uuid4()}" # Unique key required for Streamlit buttons
                     )
                     if len(df) > 10:
-                        st.text("First 10 rows of data")
+                        st.caption(f"Showing first 10 of {len(df)} rows below:")
                         st.dataframe(df.head(10))
                     else:
                         st.dataframe(df)
+                        
                 if msg.get("plotly_code") and st.session_state.get("show_plotly_code", False):
                     st.code(msg["plotly_code"], language="python", line_numbers=True)
                 if msg.get("fig") and st.session_state.get("show_chart", True):
@@ -117,8 +120,19 @@ if my_question:
             if df is not None:
                 turn_data["df"] = df
                 if st.session_state.get("show_table", True):
+
+                    # Custom Download Button for the Active Turn
+                    csv = convert_df_to_csv(df)
+                    st.download_button(
+                         label=f"📥 Download Full Data ({len(df)} rows)",
+                         data=csv,
+                         file_name='fsi_data_export.csv',
+                         mime='text/csv',
+                         key=f"download_active_{uuid.uuid4()}" 
+                    )
+                    
                     if len(df) > 10:
-                        st.text("First 10 rows of data")
+                        st.caption(f"Showing first 10 of {len(df)} rows below:")
                         st.dataframe(df.head(10))
                     else:
                         st.dataframe(df)
