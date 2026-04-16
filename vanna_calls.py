@@ -404,4 +404,13 @@ def generate_followup_cached(question, sql, df):
 def generate_summary_cached(question, df):
     if df is None or df.empty:
         return "No data was returned for that question."
+
+    if len(df) == 1:
+        return generate_response(question, df)
+    elif len(df) <= 5:
+        return generate_response(question, df.head(5))
+    else:
+        # For large result sets, just confirm what was returned
+        cols = ", ".join(df.columns.tolist())
+        return f"Query returned {len(df)} records with columns: {cols}."
     return generate_response(question, df)
