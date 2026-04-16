@@ -548,17 +548,17 @@ Return ONLY the SQL query with no explanation, no markdown, no code fences.
                 }).content.strip()
                 
                 st.markdown("**Step 4: Retried SQL:**")
-                    st.code(sql, language="sql")
+                st.code(sql, language="sql")
                     
-                    df = run_query(sql)
-                    sql_error = st.session_state.pop("last_sql_error", None)
-                    if df is not None and not df.empty:
-                        st.success(f"✅ Retry successful — {len(df)} row(s).")
-                    elif sql_error:
-                        st.error(f"Retry also failed: {sql_error}")
-                    else:
-                        st.info("Retry ran but returned 0 results.")
-                    return sql, df
+                df = run_query(sql)
+                sql_error = st.session_state.pop("last_sql_error", None)
+                if df is not None and not df.empty:
+                    st.success(f"✅ Retry successful — {len(df)} row(s).")
+                elif sql_error:
+                    st.error(f"Retry also failed: {sql_error}")
+                else:
+                    st.info("Retry ran but returned 0 results.")
+                return sql, df
 
             # --- Branch B: Zero results — inject real enum values ---
             else:
