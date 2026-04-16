@@ -161,14 +161,12 @@ if my_question:
 
         history_str = build_history_string(st.session_state["messages"][:-1])
 
-        sql = generate_sql_cached(question=my_question, history=history_str)
+        sql, df = generate_sql_cached(question=my_question, history=history_str)
         
         if sql and is_sql_valid_cached(sql=sql):
             turn_data["sql"] = sql
             if st.session_state.get("show_sql", True):
                 st.code(sql, language="sql", line_numbers=True)
-                
-            df = run_sql_cached(sql=sql)
             
             if df is not None:
                 turn_data["df"] = df
