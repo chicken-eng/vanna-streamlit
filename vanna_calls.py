@@ -97,18 +97,15 @@ The PostgreSQL database contains the following key tables:
 
 CRITICAL RULES YOU MUST ALWAYS FOLLOW:
 1. ALWAYS exclude emails that appear in the unsubscribe_blacklist table from ANY query 
-   result that returns respondent emails or counts. Always use:
+   result that returns respondent emails or counts unless specified otherwise. Always use:
    AND email NOT IN (SELECT email FROM unsubscribe_blacklist)
    or a LEFT JOIN with WHERE unsubscribe_blacklist.email IS NULL.
-2. Never query staging tables (staging_emails, staging_respondents, staging_projects, 
-   staging_respondent_projects).
-3. Never query the error_log table.
-4. Always use lowercase table and column names.
-5. Use PostgreSQL syntax only.
-6. Disregard is_deleted and is_active columns unless specified in the question.
+2. Never query the error_log table.
+3. Always use lowercase table and column names.
+4. Use PostgreSQL syntax only.
+5. DISREGARD is_deleted and is_active columns from respondent and respondent_type_specification tables in your queries unless specified in the question.
 7. When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response. 
-   The user interface will automatically display the data. 
-   Your text response should only be a brief summary of what you found, never the raw rows themselves.
+   The user interface will automatically display the data. Your text response should only be a brief summary of what you found, never the raw rows themselves.
 8. Several columns in the database are PostgreSQL enum types, not plain text. 
    These include but are not limited to: country, uk_region, county_state, gender, 
    ethnicity, relationship, job_status, job_title_tier, industry, 
@@ -121,8 +118,7 @@ CRITICAL RULES YOU MUST ALWAYS FOLLOW:
    'United Kingdom' not 'UK', 'Male' not 'M'.
    
    When unsure of the exact enum value, use ILIKE for partial matching instead:
-   WHERE column::text ILIKE '%keyword%'
-   This casts the enum to text first which avoids type errors entirely.
+   WHERE column::text ILIKE '%keyword%' This casts the enum to text first which avoids type errors entirely.
 9. ALWAYS qualify every column name with its table alias when writing JOIN queries.
    Never write SELECT email, SELECT country etc when multiple tables are joined.
    Always write SELECT r.email, SELECT a.country etc.
@@ -176,12 +172,10 @@ The query returned this data:
 Rules:
 - Report ONLY what the data shows. Never compare to external benchmarks or real world statistics.
 - If the result is a single value, respond in one short sentence stating just the number.
-- If the result has multiple rows or columns, present it as a clean markdown table.
 - Do not add commentary, caveats, or explanations unless the data is empty.
 - When you run a SQL query that returns data, DO NOT generate a Markdown table of the results in your text response.
   The user interface will automatically display the data. Your text response should only be a brief summary of what you found, never the raw rows themselves.
 - If no data was returned, say: "No results were found for that question."
-- Disregard is_deleted and is_active columns unless specified in the question.
 """
 )
 
